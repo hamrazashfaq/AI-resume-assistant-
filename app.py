@@ -19,7 +19,9 @@ from pypdf import PdfReader
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
+# Tried in order if the chosen model returns "not found / no longer available"
+FALLBACK_MODELS = ["gemini-flash-latest"]
 MAX_FILE_MB = 5
 MAX_CHARS = 20000  # keep the prompt small and cheap
 
@@ -160,14 +162,24 @@ def analyse_resume(resume_text: str, job_desc: str, api_key: str, model: str) ->
     )
 
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.2,
-            response_mime_type="application/json",
-        ),
-    )
+    # Gemini 3 models work best with the default temperature, so we don't override it.
+    config = types.GenerateContentConfig(response_mime_type="application/json")
+
+    response, last_error = None, None
+    for candidate in [model] + [m for m in FALLBACK_MODELS if m != model]:
+        try:
+            response = client.models.generate_content(
+                model=candidate, contents=prompt, config=config
+            )
+            break
+        except Exception as e:  # only fall back when the model itself is unavailable
+            msg = str(e)
+            if "404" in msg or "NOT_FOUND" in msg or "no longer available" in msg:
+                last_error = e
+                continue
+            raise
+    if response is None:
+        raise last_error
     data = parse_json(response.text)
 
     # Normalise so the UI never crashes on odd model output
