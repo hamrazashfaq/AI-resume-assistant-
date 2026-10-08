@@ -1,4 +1,3 @@
-# AI-resume-assistant-
 # 📄 ATS Resume Checker
 
 A Streamlit app that scores a resume for Applicant Tracking System (ATS) compatibility and gives concrete improvement suggestions using Google's Gemini Flash model.
@@ -46,9 +45,9 @@ streamlit run app.py
 | Name | Purpose | Default |
 |------|---------|---------|
 | `GEMINI_API_KEY` | Your Gemini API key | none (required) |
-| `GEMINI_MODEL` | Gemini model name | `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Gemini model name | `gemini-3.8-flash` |
 
-If Google retires a model name, set `GEMINI_MODEL` to a current Flash model from https://ai.google.dev/gemini-api/docs/models.
+If the model is unavailable, the app automatically falls back to `gemini-flash-latest`. If Google retires a model name again, set `GEMINI_MODEL` (env var or Streamlit secret) to a current Flash model from https://ai.google.dev/gemini-api/docs/models.
 
 ## Deploy on Streamlit Community Cloud
 1. Push this repo to GitHub (never commit your API key).
