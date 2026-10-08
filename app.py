@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import time
 
 import streamlit as st
 from docx import Document
@@ -20,8 +21,10 @@ from pypdf import PdfReader
 # Config
 # ----------------------------------------------------------------------------
 DEFAULT_MODEL = "gemini-3.8-flash"
-# Tried in order if the chosen model returns "not found / no longer available"
-FALLBACK_MODELS = ["gemini-flash-latest"]
+# Tried in order when the chosen model is unavailable, overloaded or out of quota
+FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"]
+RETRIES_PER_MODEL = 3      # attempts per model for temporary errors (503 etc.)
+BACKOFF_SECONDS = 2        # waits 2s, 4s between attempts
 MAX_FILE_MB = 5
 MAX_CHARS = 20000  # keep the prompt small and cheap
 
@@ -150,6 +153,41 @@ JSON schema:
 """
 
 
+def error_kind(exc: Exception) -> str:
+    """Classify a Gemini error: 'retry' (temporary), 'switch' (try another model) or 'fatal'."""
+    msg = str(exc)
+    low = msg.lower()
+    if any(k in msg for k in ("503", "500", "504", "UNAVAILABLE", "INTERNAL", "DEADLINE_EXCEEDED")) \
+            or any(k in low for k in ("overloaded", "high demand", "timed out", "timeout", "connection")):
+        return "retry"
+    if any(k in msg for k in ("404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED")) \
+            or "no longer available" in low:
+        return "switch"
+    return "fatal"  # bad API key, invalid request, etc. Retrying will not help
+
+
+def generate_with_fallback(client, model: str, prompt: str, config):
+    """Call Gemini. Retry temporary errors with backoff, then fall back to other models."""
+    last_error = None
+    for candidate in [model] + [m for m in FALLBACK_MODELS if m != model]:
+        for attempt in range(RETRIES_PER_MODEL):
+            try:
+                return client.models.generate_content(model=candidate, contents=prompt, config=config)
+            except Exception as e:
+                kind = error_kind(e)
+                if kind == "fatal":
+                    raise
+                last_error = e
+                if kind == "switch":
+                    break  # no point retrying this model
+                if attempt < RETRIES_PER_MODEL - 1:
+                    time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+    raise RuntimeError(
+        "Gemini is overloaded or unavailable right now (all models tried). "
+        f"Please try again in a minute. Last error: {last_error}"
+    )
+
+
 def analyse_resume(resume_text: str, job_desc: str, api_key: str, model: str) -> dict:
     jd_clause = " against the job description" if job_desc else ""
     jd_hint = " matched to the job description" if job_desc else ""
@@ -165,21 +203,7 @@ def analyse_resume(resume_text: str, job_desc: str, api_key: str, model: str) ->
     # Gemini 3 models work best with the default temperature, so we don't override it.
     config = types.GenerateContentConfig(response_mime_type="application/json")
 
-    response, last_error = None, None
-    for candidate in [model] + [m for m in FALLBACK_MODELS if m != model]:
-        try:
-            response = client.models.generate_content(
-                model=candidate, contents=prompt, config=config
-            )
-            break
-        except Exception as e:  # only fall back when the model itself is unavailable
-            msg = str(e)
-            if "404" in msg or "NOT_FOUND" in msg or "no longer available" in msg:
-                last_error = e
-                continue
-            raise
-    if response is None:
-        raise last_error
+    response = generate_with_fallback(client, model, prompt, config)
     data = parse_json(response.text)
 
     # Normalise so the UI never crashes on odd model output
