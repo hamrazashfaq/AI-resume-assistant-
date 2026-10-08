@@ -47,7 +47,7 @@ streamlit run app.py
 | `GEMINI_API_KEY` | Your Gemini API key | none (required) |
 | `GEMINI_MODEL` | Gemini model name | `gemini-3.8-flash` |
 
-If the model is unavailable, the app automatically falls back to `gemini-flash-latest`. If Google retires a model name again, set `GEMINI_MODEL` (env var or Streamlit secret) to a current Flash model from https://ai.google.dev/gemini-api/docs/models.
+Gemini sometimes returns `503 UNAVAILABLE` (high demand). The app retries up to 3 times with a short wait, then automatically falls back to `gemini-3.7-flash`, `gemini-3.5-flash-lite` and `gemini-flash-latest`. If Google retires a model name again, set `GEMINI_MODEL` (env var or Streamlit secret) to a current Flash model from https://ai.google.dev/gemini-api/docs/models.
 
 ## Deploy on Streamlit Community Cloud
 1. Push this repo to GitHub (never commit your API key).
